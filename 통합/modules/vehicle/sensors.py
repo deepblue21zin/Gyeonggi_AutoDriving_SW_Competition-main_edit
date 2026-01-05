@@ -21,7 +21,17 @@ import config
 camera = None
 lidar = None
 arduino = None
-ultrasonic_distance = 0
+ultrasonic_distance = 0  # 구버전 호환용 (단일 값)
+
+# 초음파 센서 6개 데이터 저장 딕셔너리
+ultrasonic_data = {
+    'F': 0,      # Front (전방)
+    'FL': 0,     # Front-Left (좌전방)
+    'FR': 0,     # Front-Right (우전방)
+    'R': 0,      # Rear (후방)
+    'RL': 0,     # Rear-Left (좌후방)
+    'RR': 0      # Rear-Right (우후방)
+}
 
 # ==================== 초기화 함수 ====================
 def initialize():
@@ -166,26 +176,58 @@ def get_lidar_scanning():
 # ==================== 초음파 센서 ====================
 def read_ultrasonic():
     """
-    아두이노에서 초음파 센서 거리 읽기
+    아두이노에서 6개 초음파 센서 거리 읽기
+
+    Arduino 전송 형식: "F:25,FL:30,FR:28,R:50,RL:45,RR:48"
 
     Returns:
-        int: 거리 (mm)
+        dict: 6개 센서 거리 딕셔너리 (단위: cm)
+              {'F': 25, 'FL': 30, 'FR': 28, 'R': 50, 'RL': 45, 'RR': 48}
+              데이터가 없으면 이전 값 반환
 
     동작:
-        - 아두이노가 시리얼로 보낸 거리값 수신
-        - 데이터가 없으면 이전 값 반환
+        1) 시리얼 포트에 데이터가 있는지 확인
+        2) 한 줄 읽기 (newline까지)
+        3) "key:value,key:value,..." 형식 파싱
+        4) 딕셔너리로 변환하여 전역 변수 업데이트
+        5) 구버전 호환 (단일 숫자만 오면 'F' 키에 저장)
     """
-    global ultrasonic_distance
+    global ultrasonic_data, ultrasonic_distance
 
+    # 시리얼 버퍼에 데이터가 있는지 확인
     if arduino.in_waiting > 0:
         try:
-            data = arduino.readline().decode('utf-8').strip()
-            if data.isdigit():
-                ultrasonic_distance = int(data)
-        except:
+            # 한 줄 읽기 (\n까지 읽고 디코딩)
+            line = arduino.readline().decode('utf-8').strip()
+
+            # 형식 1: "F:25,FL:30,..." (신규 6개 센서 형식)
+            if ':' in line and ',' in line:
+                # 쉼표로 분리: ["F:25", "FL:30", "FR:28", ...]
+                parts = line.split(',')
+
+                # 각 부분을 "key:value"로 분리하여 딕셔너리 생성
+                for part in parts:
+                    if ':' in part:  # 안전성 체크
+                        key, value = part.split(':')
+                        # 문자열을 정수로 변환하여 저장
+                        ultrasonic_data[key] = int(value)
+
+                # 구버전 호환: 전방 센서값을 단일 변수에도 저장
+                ultrasonic_distance = ultrasonic_data.get('F', 0)
+
+            # 형식 2: "123" (구버전 단일 숫자 - Exercise_1.ino 호환)
+            elif line.isdigit():
+                distance_value = int(line)
+                # 전방 센서로 간주
+                ultrasonic_data['F'] = distance_value
+                ultrasonic_distance = distance_value
+
+        except Exception as e:
+            # 파싱 오류 시 무시 (이전 값 유지)
             pass
 
-    return ultrasonic_distance
+    # 딕셔너리 반환 (6개 센서 데이터)
+    return ultrasonic_data
 
 
 # ==================== 카메라 읽기 ====================
